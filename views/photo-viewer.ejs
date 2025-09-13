@@ -3,66 +3,326 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Photo Viewer</title>
+  <title>MentraOS Camera & Streaming</title>
   <style>
     body {
       margin: 0;
-      padding: 0;
-      background-color: #000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      padding: 20px;
+      background-color: #1a1a1a;
+      color: white;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       min-height: 100vh;
-      font-family: Arial, sans-serif;
     }
 
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      color: #4CAF50;
+      margin-bottom: 10px;
+    }
+
+    .tabs {
+      display: flex;
+      background-color: #2a2a2a;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 15px;
+      text-align: center;
+      cursor: pointer;
+      background-color: #2a2a2a;
+      border: none;
+      color: white;
+      font-size: 16px;
+      transition: background-color 0.3s;
+    }
+
+    .tab.active {
+      background-color: #4CAF50;
+    }
+
+    .tab:hover {
+      background-color: #3a3a3a;
+    }
+
+    .tab.active:hover {
+      background-color: #45a049;
+    }
+
+    .content {
+      background-color: #2a2a2a;
+      border-radius: 8px;
+      padding: 20px;
+      min-height: 400px;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Photo Tab Styles */
     .photo-container {
-      max-width: 100vw;
-      max-height: 100vh;
       display: flex;
       justify-content: center;
       align-items: center;
+      min-height: 300px;
     }
 
     .photo {
       max-width: 100%;
-      max-height: 100%;
+      max-height: 400px;
       object-fit: contain;
       border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
     }
 
     .no-photo {
-      color: white;
       text-align: center;
       font-size: 18px;
+      color: #888;
     }
 
     .loading {
-      color: white;
       text-align: center;
       font-size: 16px;
+      color: #4CAF50;
+    }
+
+    /* Streaming Tab Styles */
+    .streaming-controls {
+      display: grid;
+      gap: 20px;
+    }
+
+    .control-group {
+      background-color: #3a3a3a;
+      padding: 20px;
+      border-radius: 8px;
+    }
+
+    .control-group h3 {
+      margin-top: 0;
+      color: #4CAF50;
+    }
+
+    .input-group {
+      margin-bottom: 15px;
+    }
+
+    .input-group label {
+      display: block;
+      margin-bottom: 5px;
+      color: #ccc;
+    }
+
+    .input-group input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      background-color: #1a1a1a;
+      color: white;
+      font-size: 14px;
+    }
+
+    .input-group input:focus {
+      outline: none;
+      border-color: #4CAF50;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-right: 10px;
+      margin-bottom: 10px;
+      transition: background-color 0.3s;
+    }
+
+    .btn-primary {
+      background-color: #4CAF50;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background-color: #45a049;
+    }
+
+    .btn-danger {
+      background-color: #f44336;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background-color: #da190b;
+    }
+
+    .btn:disabled {
+      background-color: #555;
+      cursor: not-allowed;
+    }
+
+    .status {
+      background-color: #1a1a1a;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 20px;
+      border-left: 4px solid #4CAF50;
+    }
+
+    .status.error {
+      border-left-color: #f44336;
+    }
+
+    .stream-info {
+      margin-top: 15px;
+    }
+
+    .stream-info a {
+      color: #4CAF50;
+      text-decoration: none;
+    }
+
+    .stream-info a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
-  <div class="photo-container">
-    <div id="content" class="loading">Loading latest photo...</div>
+  <div class="container">
+    <div class="header">
+      <h1>MentraOS Camera & Streaming</h1>
+      <p>Take photos and stream live video from your Mentra glasses</p>
+    </div>
+    
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab(0)">📷 Photos</button>
+      <button class="tab" onclick="switchTab(1)">📺 Live Streaming</button>
+    </div>
+    
+    <div class="content">
+      <!-- Photo Tab -->
+      <div class="tab-content active" id="photo-tab">
+        <div class="photo-container">
+          <div id="photo-content" class="loading">Loading latest photo...</div>
+        </div>
+        <div class="status">
+          <p><strong>Instructions:</strong> Press the button on your Mentra glasses to take a photo. Long press to toggle continuous photo mode.</p>
+        </div>
+      </div>
+      
+      <!-- Streaming Tab -->
+      <div class="tab-content" id="streaming-tab">
+        <div class="streaming-controls">
+          <div class="control-group">
+            <h3>🎥 Stream to Your Website</h3>
+            <p>Stream live video from your glasses to any RTMP endpoint</p>
+            
+            <div class="input-group">
+              <label for="rtmp-url">RTMP URL:</label>
+              <input type="text" id="rtmp-url" placeholder="rtmp://your-website.com/live/stream" value="">
+            </div>
+            
+            <button class="btn btn-primary" id="start-managed-btn" onclick="startManagedStream()">
+              🚀 Start Managed Stream
+            </button>
+            <button class="btn btn-primary" id="start-unmanaged-btn" onclick="startUnmanagedStream()">
+              📡 Start Direct RTMP
+            </button>
+            <button class="btn btn-danger" id="stop-stream-btn" onclick="stopStream()" disabled>
+              ⏹️ Stop Stream
+            </button>
+          </div>
+          
+          <div class="status" id="stream-status-container">
+            <h4>Stream Status</h4>
+            <p>Status: <span id="stream-status">Idle</span></p>
+            <p>Type: <span id="stream-type">None</span></p>
+            <div id="stream-urls" style="display: none;">
+              <div class="stream-info">
+                <p><strong>HLS URL:</strong> <a id="hls-url" href="#" target="_blank">-</a></p>
+                <p><strong>DASH URL:</strong> <a id="dash-url" href="#" target="_blank">-</a></p>
+                <p><strong>Preview:</strong> <a id="preview-url" href="#" target="_blank">-</a></p>
+              </div>
+            </div>
+            <div id="stream-error" style="display: none; color: #f44336; margin-top: 10px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
     let currentRequestId = null;
+    let streamEventSource = null;
+    let currentTab = 0;
 
-    /**
-     * Check for new photos and update display
-     */
+    // Tab switching
+    function switchTab(tabIndex) {
+      const tabs = document.querySelectorAll('.tab');
+      const contents = document.querySelectorAll('.tab-content');
+      
+      tabs.forEach((tab, index) => {
+        tab.classList.toggle('active', index === tabIndex);
+      });
+      
+      contents.forEach((content, index) => {
+        content.classList.toggle('active', index === tabIndex);
+      });
+      
+      currentTab = tabIndex;
+      
+      // Start/stop appropriate functionality based on tab
+      if (tabIndex === 0) {
+        startPhotoUpdates();
+        stopStreamUpdates();
+      } else {
+        stopPhotoUpdates();
+        startStreamUpdates();
+      }
+    }
+
+    // Photo functionality
+    let photoInterval;
+    
+    function startPhotoUpdates() {
+      if (photoInterval) return;
+      checkForNewPhoto(); // Initial check
+      photoInterval = setInterval(checkForNewPhoto, 500);
+    }
+    
+    function stopPhotoUpdates() {
+      if (photoInterval) {
+        clearInterval(photoInterval);
+        photoInterval = null;
+      }
+    }
+
     async function checkForNewPhoto() {
       try {
         const response = await fetch('/api/latest-photo');
 
         if (response.status === 404) {
-          // No photo available
-          document.getElementById('content').innerHTML =
-            '<div class="no-photo">No photos taken yet. Take a photo using your Mentra Live by pressing the right button!</div>';
+          document.getElementById('photo-content').innerHTML =
+            '<div class="no-photo">No photos taken yet.<br>Press the button on your Mentra glasses to take a photo!</div>';
           return;
         }
 
@@ -72,24 +332,144 @@
 
         const photoInfo = await response.json();
 
-        // Check if this is a new photo
         if (photoInfo.requestId !== currentRequestId) {
           currentRequestId = photoInfo.requestId;
-
-          // Update the display with new photo
-          document.getElementById('content').innerHTML =
+          document.getElementById('photo-content').innerHTML =
             '<img class="photo" src="/api/photo/' + photoInfo.requestId + '" alt="Latest Photo" />';
         }
       } catch (error) {
         console.error('Error checking for new photo:', error);
-        document.getElementById('content').innerHTML =
+        document.getElementById('photo-content').innerHTML =
           '<div class="no-photo">Error loading photo. Please refresh the page.</div>';
       }
     }
 
-    // Check for new photos every 500ms (twice per second)
-    checkForNewPhoto(); // Initial check
-    setInterval(checkForNewPhoto, 500);
+    // Streaming functionality
+    function startStreamUpdates() {
+      if (streamEventSource) return;
+      
+      streamEventSource = new EventSource('/stream-status');
+      
+      streamEventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        updateStreamStatus(data);
+      };
+      
+      streamEventSource.onerror = function(error) {
+        console.error('Stream status error:', error);
+      };
+    }
+    
+    function stopStreamUpdates() {
+      if (streamEventSource) {
+        streamEventSource.close();
+        streamEventSource = null;
+      }
+    }
+
+    function updateStreamStatus(data) {
+      document.getElementById('stream-status').textContent = data.streamStatus || 'Idle';
+      document.getElementById('stream-type').textContent = data.streamType || 'None';
+      
+      const urlsDiv = document.getElementById('stream-urls');
+      const errorDiv = document.getElementById('stream-error');
+      
+      if (data.error) {
+        errorDiv.textContent = data.error;
+        errorDiv.style.display = 'block';
+      } else {
+        errorDiv.style.display = 'none';
+      }
+      
+      if (data.hlsUrl || data.dashUrl || data.previewUrl) {
+        document.getElementById('hls-url').href = data.hlsUrl || '#';
+        document.getElementById('hls-url').textContent = data.hlsUrl || '-';
+        document.getElementById('dash-url').href = data.dashUrl || '#';
+        document.getElementById('dash-url').textContent = data.dashUrl || '-';
+        document.getElementById('preview-url').href = data.previewUrl || '#';
+        document.getElementById('preview-url').textContent = data.previewUrl || '-';
+        urlsDiv.style.display = 'block';
+      } else {
+        urlsDiv.style.display = 'none';
+      }
+      
+      // Update button states
+      const isStreaming = data.streamStatus === 'active' || data.streamStatus === 'starting';
+      document.getElementById('start-managed-btn').disabled = isStreaming;
+      document.getElementById('start-unmanaged-btn').disabled = isStreaming;
+      document.getElementById('stop-stream-btn').disabled = !isStreaming;
+    }
+
+    async function startManagedStream() {
+      const rtmpUrl = document.getElementById('rtmp-url').value.trim();
+      
+      try {
+        const response = await fetch('/api/stream/managed/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rtmpUrl: rtmpUrl || undefined })
+        });
+        
+        const result = await response.json();
+        if (!result.ok) {
+          alert('Error starting stream: ' + result.error);
+        }
+      } catch (error) {
+        alert('Error starting stream: ' + error.message);
+      }
+    }
+
+    async function startUnmanagedStream() {
+      const rtmpUrl = document.getElementById('rtmp-url').value.trim();
+      
+      if (!rtmpUrl) {
+        alert('Please enter an RTMP URL for direct streaming');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/stream/unmanaged/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rtmpUrl })
+        });
+        
+        const result = await response.json();
+        if (!result.ok) {
+          alert('Error starting stream: ' + result.error);
+        }
+      } catch (error) {
+        alert('Error starting stream: ' + error.message);
+      }
+    }
+
+    async function stopStream() {
+      try {
+        // Try stopping managed stream first
+        let response = await fetch('/api/stream/managed/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.ok) {
+          // If managed stop fails, try unmanaged
+          response = await fetch('/api/stream/unmanaged/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        
+        const result = await response.json();
+        if (!result.ok) {
+          alert('Error stopping stream: ' + result.error);
+        }
+      } catch (error) {
+        alert('Error stopping stream: ' + error.message);
+      }
+    }
+
+    // Initialize
+    startPhotoUpdates();
   </script>
 </body>
 </html>

@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  nginx-rtmp:
+    image: alfg/nginx-rtmp
+    ports:
+      - "1935:1935"  # RTMP port
+      - "8080:80"     # HLS playback port
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./hls:/var/www/html/hls
+    restart: unless-stopped
+
+  # Optional: Simple web server for HLS files
+  hls-server:
+    image: nginx:alpine
+    ports:
+      - "8081:80"
+    volumes:
+      - ./hls:/usr/share/nginx/html
+    restart: unless-stopped
