@@ -146,7 +146,29 @@ class SimpleMentraPhotoApp extends AppServer {
       // Convert photo buffer to base64
       const base64Image = photo.buffer.toString('base64');
       
-      // Call Python face processing service
+      // Get face crops from Python service
+      const cropResponse = await fetch('http://localhost:5000/crop-faces', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image: base64Image })
+      });
+
+      if (!cropResponse.ok) {
+        throw new Error(`Face cropping service error: ${cropResponse.status}`);
+      }
+
+      const cropResult = await cropResponse.json();
+      
+      if (!cropResult.has_faces) {
+        return photo; // No faces found, return original
+      }
+
+      // Store face crops in Supabase
+      await this.storeFaceCrops(cropResult.face_crops, photo.requestId);
+      
+      // Call original face processing service for bounding boxes
       const response = await fetch('http://localhost:5000/process-faces', {
         method: 'POST',
         headers: {
@@ -161,14 +183,10 @@ class SimpleMentraPhotoApp extends AppServer {
 
       const result = await response.json();
       
-      if (!result.has_faces) {
-        return photo; // No faces found, return original
-      }
-      
       // Convert processed image back to buffer
       const processedBuffer = Buffer.from(result.processed_image, 'base64');
       
-      this.logger.info(`✅ Face processed: ${result.faces_detected} face(s) highlighted in photo ${photo.requestId}`);
+      this.logger.info(`✅ Face processed: ${result.faces_detected} face(s) highlighted and cropped in photo ${photo.requestId}`);
       
       // Return new PhotoData with processed image
       return {
@@ -180,6 +198,64 @@ class SimpleMentraPhotoApp extends AppServer {
     } catch (error) {
       this.logger.error('Error processing photo with face:', error);
       return photo; // Return original on error
+    }
+  }
+
+  /**
+   * Store individual face crops in Supabase
+   */
+  private async storeFaceCrops(faceCrops: any[], photoRequestId: string): Promise<void> {
+    try {
+      for (const faceCrop of faceCrops) {
+        // Create temporary person ID (will be replaced with actual person matching in Phase 3)
+        const tempPersonId = `temp_person_${Date.now()}_${faceCrop.face_id}`;
+        
+        // Upload face crop to face_crops bucket
+        const cropFileName = `${tempPersonId}/${photoRequestId}_face_${faceCrop.face_id}.jpg`;
+        const cropBuffer = Buffer.from(faceCrop.face_crop_base64, 'base64');
+        
+        const { error: cropUploadError } = await this.supabase.storage
+          .from('face_crops')
+          .upload(cropFileName, cropBuffer, {
+            contentType: 'image/jpeg',
+            upsert: false
+          });
+
+        if (cropUploadError) {
+          throw cropUploadError;
+        }
+
+        // Get public URL for the face crop
+        const { data: cropUrlData } = this.supabase.storage
+          .from('face_crops')
+          .getPublicUrl(cropFileName);
+
+        // Store face crop metadata in database
+        const { error: dbError } = await this.supabase
+          .from('testphoto')
+          .insert({
+            image_url: cropUrlData.publicUrl,
+            status: 'face_crop',
+            created_at: new Date().toISOString(),
+            // Store additional metadata as JSON
+            metadata: {
+              photo_request_id: photoRequestId,
+              face_id: faceCrop.face_id,
+              temp_person_id: tempPersonId,
+              bounding_box: faceCrop.bounding_box,
+              crop_coordinates: faceCrop.crop_coordinates
+            }
+          });
+
+        if (dbError) {
+          throw dbError;
+        }
+
+        this.logger.info(`📸 Face crop stored: ${cropFileName} for temp person ${tempPersonId}`);
+      }
+    } catch (error) {
+      this.logger.error('Error storing face crops:', error);
+      throw error;
     }
   }
 

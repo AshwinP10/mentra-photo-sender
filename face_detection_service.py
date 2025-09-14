@@ -122,6 +122,87 @@ def process_faces():
         logging.error(f"Error processing faces: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/crop-faces', methods=['POST'])
+def crop_faces():
+    """
+    Detect faces and return individual face crops as base64 images
+    """
+    try:
+        # Get image data from request
+        data = request.get_json()
+        if 'image' not in data:
+            return jsonify({'error': 'No image provided'}), 400
+        
+        # Decode base64 image
+        image_data = base64.b64decode(data['image'])
+        image = Image.open(BytesIO(image_data))
+        
+        # Convert PIL to OpenCV format
+        opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
+        
+        # Detect faces
+        faces = face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(30, 30)
+        )
+        
+        if len(faces) == 0:
+            return jsonify({
+                'faces_detected': 0,
+                'has_faces': False,
+                'face_crops': []
+            })
+        
+        # Extract face crops
+        face_crops = []
+        for i, (x, y, w, h) in enumerate(faces):
+            # Add padding around face (20% on each side)
+            padding = int(min(w, h) * 0.2)
+            x_start = max(0, x - padding)
+            y_start = max(0, y - padding)
+            x_end = min(opencv_image.shape[1], x + w + padding)
+            y_end = min(opencv_image.shape[0], y + h + padding)
+            
+            # Crop face from original image
+            face_crop = opencv_image[y_start:y_end, x_start:x_end]
+            
+            # Convert to base64
+            _, buffer = cv2.imencode('.jpg', face_crop)
+            face_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            face_crops.append({
+                'face_id': i + 1,
+                'bounding_box': {
+                    'x': int(x),
+                    'y': int(y),
+                    'width': int(w),
+                    'height': int(h)
+                },
+                'crop_coordinates': {
+                    'x_start': int(x_start),
+                    'y_start': int(y_start),
+                    'x_end': int(x_end),
+                    'y_end': int(y_end)
+                },
+                'face_crop_base64': face_base64
+            })
+        
+        result = {
+            'faces_detected': len(faces),
+            'has_faces': True,
+            'face_crops': face_crops
+        }
+        
+        logging.info(f"Extracted {len(faces)} face crop(s)")
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Error cropping faces: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""

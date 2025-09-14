@@ -7,3 +7,40 @@ Computer Vision/Image Processing Feature Building:
 5. We will use supabase to store the photos, I have tables for encounters, people, and face embeddings.
 6. Photos should not be triggered by button press, it should just happen pretty regularly and get sorted accordingly.
 7. We want to frame a person's face by cropping the picture of the face to get a better centered photo of them.
+
+=== PROJECT PHASES ===
+
+PHASE 1: Face Cropping & Storage System
+- Extract face crops from green bounding boxes
+- Store cropped faces in separate Supabase bucket (face_crops)
+- Update database to store both full photo and face crop URLs
+- Create person folders structure in storage
+- Test face cropping accuracy and quality
+
+PHASE 2: Face Embedding Generation
+- Add face recognition library to Python service (face_recognition or insightface)
+- Generate 128/512-dimensional face embeddings from cropped faces
+- Store embeddings in face_embeddings table
+- Add embedding comparison functions (cosine similarity)
+- Test embedding quality and consistency
+
+PHASE 3: Person Identification & Matching
+- Implement person matching algorithm using embedding similarity
+- Set similarity thresholds (0.7+ = same person)
+- Create new person IDs for unmatched faces
+- Organize photos by person in separate storage folders
+- Add person management API endpoints
+
+PHASE 4: Automatic Photo Capture
+- Replace button-triggered capture with timer-based system
+- Add motion detection to trigger photos when people present
+- Implement photo queue processing for multiple faces
+- Add batch processing for high-volume scenarios
+- Optimize for continuous operation
+
+PHASE 5: Person Viewing Interface
+- Create web interface to browse people and their photos
+- Add person statistics (photo count, first seen, last seen)
+- Enable person merging for duplicate identities
+- Add manual person labeling/naming features
+- Create person timeline views
