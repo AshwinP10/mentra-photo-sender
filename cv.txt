@@ -1,0 +1,9 @@
+Computer Vision/Image Processing Feature Building:
+
+1. Basically we want to take photos pretty regularly, but sort them for each person
+2. Every unique person should have their own folder, so if a photo is taken, determine who it is
+3. If it is a new person, we need to create a new folder for them
+4. If a photo does not have a face in it, then we throw it away, it does not get stored
+5. We will use supabase to store the photos, I have tables for encounters, people, and face embeddings.
+6. Photos should not be triggered by button press, it should just happen pretty regularly and get sorted accordingly.
+7. We want to frame a person's face by cropping the picture of the face to get a better centered photo of them.

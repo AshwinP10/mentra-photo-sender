@@ -2,10 +2,15 @@ import { config } from 'dotenv';
 config(); // Load environment variables from .env file
 
 import { AppServer, AppSession, PhotoData } from '@mentra/sdk';
+import { createClient } from '@supabase/supabase-js';
 
 const PACKAGE_NAME = process.env.PACKAGE_NAME ?? (() => { throw new Error('PACKAGE_NAME is not set in .env file'); })();
 const MENTRAOS_API_KEY = process.env.MENTRAOS_API_KEY ?? (() => { throw new Error('MENTRAOS_API_KEY is not set in .env file'); })();
 const PORT = parseInt(process.env.PORT || '3000');
+
+// Supabase configuration
+const SUPABASE_URL = process.env.SUPABASE_URL ?? (() => { throw new Error('SUPABASE_URL is not set in .env file'); })();
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY ?? (() => { throw new Error('SUPABASE_SERVICE_KEY is not set in .env file'); })();
 
 /**
  * Simple Photo Sender App
@@ -13,6 +18,7 @@ const PORT = parseInt(process.env.PORT || '3000');
  */
 class SimpleMentraPhotoApp extends AppServer {
   private photos: PhotoData[] = []; // Store photos in memory
+  private supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   constructor() {
     super({
@@ -21,6 +27,7 @@ class SimpleMentraPhotoApp extends AppServer {
       port: PORT,
     });
     this.setupRoutes();
+    this.logger.info('Supabase client initialized for encounters storage');
   }
 
   /**
@@ -38,8 +45,9 @@ class SimpleMentraPhotoApp extends AppServer {
         const photo = await session.camera.requestPhoto();
         this.logger.info(`Photo taken for user ${userId}, timestamp: ${photo.timestamp}`);
         
-        // Store photo and send to endpoint
+        // Store photo locally and upload to Supabase
         this.photos.push(photo);
+        await this.uploadPhotoAndCreateEncounter(photo, userId);
         await this.sendPhotoToEndpoint(photo, userId);
         
         session.layouts.showTextWall("Photo sent successfully!", {durationMs: 2000});
@@ -53,6 +61,53 @@ class SimpleMentraPhotoApp extends AppServer {
   protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
     this.logger.info(`Session stopped for user ${userId}, reason: ${reason}`);
   }
+
+  /**
+   * Upload photo to Supabase storage and create encounter record
+   */
+  private async uploadPhotoAndCreateEncounter(photo: PhotoData, userId: string): Promise<void> {
+    try {
+      // Upload photo to Supabase storage
+      const fileName = `${userId}/${photo.requestId}_${photo.timestamp}.jpg`;
+      
+      const { error: uploadError } = await this.supabase.storage
+        .from('testphoto')
+        .upload(fileName, photo.buffer, {
+          contentType: photo.mimeType,
+          upsert: false
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // Get public URL for the uploaded image
+      const { data: urlData } = this.supabase.storage
+        .from('testphoto')
+        .getPublicUrl(fileName);
+
+      // Create record in testphoto table (simplified)
+      const { error } = await this.supabase
+        .from('testphoto')
+        .insert({
+          image_url: urlData.publicUrl,
+          status: 'uploaded',
+          created_at: new Date().toISOString()
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      this.logger.info(`Photo uploaded and encounter created for ${photo.requestId}, user ${userId}`);
+      this.logger.info(`Image URL: ${urlData.publicUrl}`);
+      
+    } catch (error) {
+      this.logger.error(`Error uploading photo and creating encounter for ${photo.requestId}:`, error);
+      throw error;
+    }
+  }
+
 
   /**
    * Send photo to the /photos endpoint
