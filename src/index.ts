@@ -3,6 +3,7 @@ config(); // Load environment variables from .env file
 
 import { AppServer, AppSession, PhotoData } from '@mentra/sdk';
 import { createClient } from '@supabase/supabase-js';
+import { createCanvas, Image } from 'canvas';
 
 const PACKAGE_NAME = process.env.PACKAGE_NAME ?? (() => { throw new Error('PACKAGE_NAME is not set in .env file'); })();
 const MENTRAOS_API_KEY = process.env.MENTRAOS_API_KEY ?? (() => { throw new Error('MENTRAOS_API_KEY is not set in .env file'); })();
@@ -19,6 +20,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY ?? (() => { throw 
 class SimpleMentraPhotoApp extends AppServer {
   private photos: PhotoData[] = []; // Store photos in memory
   private supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  private faceApiInitialized = false;
 
   constructor() {
     super({
@@ -27,7 +29,27 @@ class SimpleMentraPhotoApp extends AppServer {
       port: PORT,
     });
     this.setupRoutes();
+    this.initializeFaceAPI();
     this.logger.info('Supabase client initialized for encounters storage');
+  }
+
+  /**
+   * Initialize Python face detection service
+   */
+  private async initializeFaceAPI(): Promise<void> {
+    try {
+      // Check if Python face detection service is running
+      const response = await fetch('http://localhost:5000/health');
+      if (response.ok) {
+        this.faceApiInitialized = true;
+        this.logger.info('Python face detection service connected successfully');
+      } else {
+        throw new Error('Face detection service not responding');
+      }
+    } catch (error) {
+      this.logger.error('Failed to connect to Python face detection service:', error);
+      this.logger.info('Face detection will be disabled - all photos will be processed');
+    }
   }
 
   /**
@@ -45,10 +67,21 @@ class SimpleMentraPhotoApp extends AppServer {
         const photo = await session.camera.requestPhoto();
         this.logger.info(`Photo taken for user ${userId}, timestamp: ${photo.timestamp}`);
         
-        // Store photo locally and upload to Supabase
+        // Store photo locally
         this.photos.push(photo);
-        await this.uploadPhotoAndCreateEncounter(photo, userId);
-        await this.sendPhotoToEndpoint(photo, userId);
+        
+        // Check for face before uploading to Supabase
+        const hasFace = await this.detectFace(photo);
+        if (!hasFace) {
+          this.logger.info(`❌ Face not detected in photo ${photo.requestId} - skipping Supabase upload`);
+          session.layouts.showTextWall("No face detected - photo not saved", {durationMs: 2000});
+          return;
+        }
+        
+        // Process and upload photo with face
+        const processedPhoto = await this.processPhotoWithFace(photo);
+        await this.uploadPhotoAndCreateEncounter(processedPhoto, userId);
+        await this.sendPhotoToEndpoint(processedPhoto, userId);
         
         session.layouts.showTextWall("Photo sent successfully!", {durationMs: 2000});
       } catch (error) {
@@ -60,6 +93,94 @@ class SimpleMentraPhotoApp extends AppServer {
 
   protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
     this.logger.info(`Session stopped for user ${userId}, reason: ${reason}`);
+  }
+
+  /**
+   * Detect if there's a face in the photo using Python service
+   */
+  private async detectFace(photo: PhotoData): Promise<boolean> {
+    if (!this.faceApiInitialized) {
+      this.logger.warn('Face detection not initialized - allowing all photos');
+      return true;
+    }
+
+    try {
+      // Convert photo buffer to base64
+      const base64Image = photo.buffer.toString('base64');
+      
+      // Call Python face detection service
+      const response = await fetch('http://localhost:5000/detect-faces', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image: base64Image })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Face detection service error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const faceCount = result.faces_detected;
+      
+      this.logger.info(`🔍 Python service detected ${faceCount} face(s) in photo ${photo.requestId}`);
+      
+      return result.has_faces;
+    } catch (error) {
+      this.logger.error('Error during Python face detection:', error);
+      // If face detection fails, allow the photo to be processed
+      return true;
+    }
+  }
+
+  /**
+   * Process photo with face - get processed image from Python service
+   */
+  private async processPhotoWithFace(photo: PhotoData): Promise<PhotoData> {
+    if (!this.faceApiInitialized) {
+      return photo; // Return original if face API not initialized
+    }
+
+    try {
+      // Convert photo buffer to base64
+      const base64Image = photo.buffer.toString('base64');
+      
+      // Call Python face processing service
+      const response = await fetch('http://localhost:5000/process-faces', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image: base64Image })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Face processing service error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.has_faces) {
+        return photo; // No faces found, return original
+      }
+      
+      // Convert processed image back to buffer
+      const processedBuffer = Buffer.from(result.processed_image, 'base64');
+      
+      this.logger.info(`✅ Face processed: ${result.faces_detected} face(s) highlighted in photo ${photo.requestId}`);
+      
+      // Return new PhotoData with processed image
+      return {
+        ...photo,
+        buffer: processedBuffer,
+        size: processedBuffer.length
+      };
+      
+    } catch (error) {
+      this.logger.error('Error processing photo with face:', error);
+      return photo; // Return original on error
+    }
   }
 
   /**

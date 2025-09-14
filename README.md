@@ -1,60 +1,189 @@
-# MentraOS-Camera-Example-App
+# MentraOS Camera App with Face Detection
 
-This is a simple example app which demonstrates how to use the MentraOS Camera API to take photos and display them in a webview.
+This app captures photos from Mentra glasses, detects faces using Python/OpenCV, and stores photos with faces in Supabase. Photos without faces are automatically discarded.
 
-You could also send the photo to an AI api, store it in a database or cloud storage, send it to Roboflow, or do other processing.
+## Features
 
-### Install MentraOS on your phone
+- **Smart Face Detection**: Only saves photos containing human faces
+- **Accurate Bounding Boxes**: Uses OpenCV for precise face detection
+- **Supabase Integration**: Stores photos and metadata in cloud database
+- **Web Interface**: View captured photos with face highlighting
+- **Real-time Processing**: Instant face detection and photo filtering
 
-MentraOS install links: [mentra.glass/install](https://mentra.glass/install)
+## Architecture
 
-### (Easiest way to get started) Set up ngrok
+- **Node.js App** (port 3000): Main Mentra glasses interface
+- **Python Service** (port 5000): Face detection microservice using OpenCV
+- **Supabase**: Cloud storage for photos and database records
 
-1. `brew install ngrok`
+## Setup
 
-2. Make an ngrok account
+### 1. Install Dependencies
+```bash
+# Node.js dependencies
+bun install
 
-3. [Use ngrok to make a static address/URL](https://dashboard.ngrok.com/)
+# Python dependencies
+pip install -r requirements.txt
+```
 
-### Register your App with MentraOS
+### 2. Configure Environment
+```bash
+cp .env.example .env
+```
+
+Update `.env` with:
+```bash
+# MentraOS Configuration
+PACKAGE_NAME=com.yourname.camera
+MENTRAOS_API_KEY=your_api_key_here
+PORT=3000
+
+# Supabase Configuration
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_KEY=your_supabase_service_role_key
+```
+
+### 3. Setup Supabase Database
+
+Run this SQL in your Supabase SQL Editor:
+```sql
+-- Create testphoto table
+CREATE TABLE public.testphoto (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  image_url TEXT NOT NULL,
+  status TEXT DEFAULT 'uploaded',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create storage bucket
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('testphoto', 'testphoto', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Set up storage permissions
+CREATE POLICY "Allow all access to service role"
+ON storage.objects 
+FOR ALL
+USING (auth.role() = 'service_role');
+```
+
+### 4. Register App with MentraOS
 
 1. Navigate to [console.mentra.glass](https://console.mentra.glass/)
-
-2. Click "Sign In", and log in with the same account you're using for MentraOS
-
+2. Click "Sign In" and log in
 3. Click "Create App"
+4. Set package name (e.g., `com.yourname.camera`)
+5. Set your ngrok URL as "Public URL"
 
-4. Set a unique package name like `com.yourName.yourAppName`
+## Running the App
 
-5. For "Public URL", enter your Ngrok's static URL
+### 1. Start Python Face Detection Service
+```bash
+python face_detection_service.py
+```
+Service will run on `http://localhost:5000`
 
-6. In the edit app screen, add the microphone permission
+### 2. Start Node.js App
+```bash
+bun run dev
+```
+App will run on `http://localhost:3000`
 
-### Get your App running!
+### 3. Setup Ngrok (for external access)
+```bash
+ngrok http --url=your-static-url 3000
+```
 
-1. [Install bun](https://bun.sh/docs/installation)
+### 4. Connect Mentra Glasses
+- Pair your glasses with the app
+- Press camera button to take photos
+- Only photos with detected faces will be saved
 
-2. Clone this repo locally: `git clone https://github.com/Mentra-Community/MentraOS-Camera-Example-App`
+## Viewing Photos
 
-3. cd into your repo, then type `bun install`
+### Web Interface
+- **All Photos**: `http://localhost:3000/photos`
+- **Individual Photo**: `http://localhost:3000/photos/{photo-id}`
+- **App Status**: `http://localhost:3000/`
 
-5. Set up your environment variables:
-   * Create a `.env` file in the root directory by copying the example: `cp .env.example .env`
-   * Edit the `.env` file with your app details:
-     ```
-     PORT=3000
-     PACKAGE_NAME=com.yourName.yourAppName
-     MENTRAOS_API_KEY=your_api_key_from_console
-     ```
-   * Make sure the `PACKAGE_NAME` matches what you registered in the MentraOS Console
-   * Get your `API_KEY` from the MentraOS Developer Console
+### Supabase Dashboard
+- **Storage**: View uploaded images in `testphoto` bucket
+- **Database**: Check `testphoto` table for photo records
 
-6. Run your app with `bun run dev`
+## Face Detection Behavior
 
-7. To expose your app to the internet (and thus MentraOS) with ngrok, run: `ngrok http --url=<YOUR_NGROK_URL_HERE> 3000`
-    * `3000` is the port. It must match what is in the app config. For example, if you entered `port: 8080`, use `8080` for ngrok instead.
+✅ **Face Detected**: Photo processed with green bounding boxes and saved to Supabase  
+❌ **No Face Detected**: Photo discarded, logged as "Face not detected - skipping Supabase upload"
 
+## API Endpoints
 
-### Next Steps
+### Node.js App (Port 3000)
+- `GET /` - App status and info
+- `GET /photos` - List all captured photos
+- `GET /photos/:requestId` - Get specific photo
+
+### Python Service (Port 5000)
+- `GET /health` - Service health check
+- `POST /detect-faces` - Detect faces in image
+- `POST /process-faces` - Process image with face bounding boxes
+
+## Troubleshooting
+
+### Python Service Not Starting
+```bash
+# Install missing dependencies
+pip install flask opencv-python pillow numpy
+
+# Check if port 5000 is available
+netstat -an | findstr :5000
+```
+
+### Face Detection Not Working
+- Ensure Python service is running on port 5000
+- Check logs for "Python face detection service connected successfully"
+- Verify OpenCV installation: `python -c "import cv2; print(cv2.__version__)"`
+
+### Supabase Upload Errors
+- Verify `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in `.env`
+- Check if `testphoto` bucket and table exist
+- Ensure storage policies are set correctly
+
+## Development
+
+### Logs
+- **Node.js**: Face detection results and Supabase operations
+- **Python**: Face detection processing and API requests
+
+### Testing Face Detection
+Send test image to Python service:
+```bash
+curl -X POST http://localhost:5000/detect-faces \
+  -H "Content-Type: application/json" \
+  -d '{"image": "base64_encoded_image_here"}'
+bun run dev
+```
+App will run on `http://localhost:3000`
+
+### 3. Connect Mentra Glasses
+- Pair your glasses with the app
+- Press camera button to take photos
+- Only photos with detected faces will be saved
+
+## Viewing Photos
+
+### Web Interface
+- **All Photos**: `http://localhost:3000/photos`
+- **Individual Photo**: `http://localhost:3000/photos/{photo-id}`
+- **App Status**: `http://localhost:3000/`
+
+### Supabase Dashboard
+- **Storage**: View uploaded images in `testphoto` bucket
+- **Database**: Check `testphoto` table for photo records
+
+## Face Detection Behavior
+
+✅ **Face Detected**: Photo processed with green bounding boxes and saved to Supabase  
+❌ **No Face Detected**: Photo discarded, logged as "Face not detected - skipping Supabase upload"
 
 Check out the full documentation at [docs.mentra.glass](https://docs.mentra.glass/camera)
