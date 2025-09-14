@@ -147,6 +147,7 @@ class SimpleMentraPhotoApp extends AppServer {
       const base64Image = photo.buffer.toString('base64');
       
       // Get face crops from Python service
+      this.logger.info('🔍 Calling face cropping service...');
       const cropResponse = await fetch('http://localhost:5000/crop-faces', {
         method: 'POST',
         headers: {
@@ -156,16 +157,50 @@ class SimpleMentraPhotoApp extends AppServer {
       });
 
       if (!cropResponse.ok) {
-        throw new Error(`Face cropping service error: ${cropResponse.status}`);
+        this.logger.error(`❌ Face cropping service error: ${cropResponse.status}`);
+        // Fall back to Phase 1 processing only (skip Phase 2 features)
+        this.logger.warn('⚠️ Falling back to Phase 1 processing only');
+        
+        // Call original face processing service for bounding boxes only
+        const response = await fetch('http://localhost:5000/process-faces', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ image: base64Image })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Face processing service error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        if (!result.has_faces) {
+          return photo; // No faces found, return original
+        }
+        
+        // Convert processed image back to buffer
+        const processedBuffer = Buffer.from(result.processed_image, 'base64');
+        
+        this.logger.info(`✅ Phase 1 fallback: ${result.faces_detected} face(s) highlighted in photo ${photo.requestId}`);
+        
+        return {
+          ...photo,
+          buffer: processedBuffer,
+          size: processedBuffer.length
+        };
       }
 
       const cropResult = await cropResponse.json();
+      this.logger.info(`✅ Face cropping result: ${cropResult.faces_detected} faces detected`);
       
       if (!cropResult.has_faces) {
+        this.logger.info('⚠️ No faces detected, processing as normal photo');
         return photo; // No faces found, return original
       }
 
-      // Store face crops in Supabase
+      // Store face crops in Supabase and generate embeddings
       await this.storeFaceCrops(cropResult.face_crops, photo.requestId);
       
       // Call original face processing service for bounding boxes
@@ -202,7 +237,7 @@ class SimpleMentraPhotoApp extends AppServer {
   }
 
   /**
-   * Store individual face crops in Supabase
+   * Store individual face crops in Supabase and generate embeddings
    */
   private async storeFaceCrops(faceCrops: any[], photoRequestId: string): Promise<void> {
     try {
@@ -231,7 +266,7 @@ class SimpleMentraPhotoApp extends AppServer {
           .getPublicUrl(cropFileName);
 
         // Store face crop metadata in database
-        const { error: dbError } = await this.supabase
+        const { data: faceCropRecord, error: dbError } = await this.supabase
           .from('testphoto')
           .insert({
             image_url: cropUrlData.publicUrl,
@@ -245,17 +280,70 @@ class SimpleMentraPhotoApp extends AppServer {
               bounding_box: faceCrop.bounding_box,
               crop_coordinates: faceCrop.crop_coordinates
             }
-          });
+          })
+          .select()
+          .single();
 
         if (dbError) {
           throw dbError;
         }
+
+        // Generate face embedding for this crop
+        await this.generateAndStoreEmbedding(faceCrop.face_crop_base64, faceCropRecord.id, tempPersonId, cropUrlData.publicUrl);
 
         this.logger.info(`📸 Face crop stored: ${cropFileName} for temp person ${tempPersonId}`);
       }
     } catch (error) {
       this.logger.error('Error storing face crops:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Generate face embedding and store in database
+   */
+  private async generateAndStoreEmbedding(faceImageBase64: string, faceCropId: string, tempPersonId: string, faceCropUrl: string): Promise<void> {
+    try {
+      // Call Python embedding service
+      const embeddingResponse = await fetch('http://localhost:5000/generate-embedding', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image: faceImageBase64 })
+      });
+
+      if (!embeddingResponse.ok) {
+        throw new Error(`Embedding service error: ${embeddingResponse.status}`);
+      }
+
+      const embeddingResult = await embeddingResponse.json();
+      
+      if (!embeddingResult.success) {
+        this.logger.warn(`⚠️ Could not generate embedding for face crop ${faceCropId}: ${embeddingResult.error}`);
+        return;
+      }
+
+      // Store embedding in face_embeddings table
+      const { error: embeddingError } = await this.supabase
+        .from('face_embeddings')
+        .insert({
+          face_crop_url: faceCropUrl,
+          embedding: JSON.stringify(embeddingResult.embedding),
+          confidence: embeddingResult.confidence,
+          temp_person_id: tempPersonId,
+          is_processed: false
+        });
+
+      if (embeddingError) {
+        throw embeddingError;
+      }
+
+      this.logger.info(`🧠 Face embedding generated with confidence ${embeddingResult.confidence.toFixed(3)} for ${tempPersonId}`);
+      
+    } catch (error) {
+      this.logger.error('Error generating face embedding:', error);
+      // Don't throw - we still want to save the face crop even if embedding fails
     }
   }
 

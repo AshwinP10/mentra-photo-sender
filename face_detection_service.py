@@ -8,9 +8,12 @@ from flask import Flask, request, jsonify
 import cv2
 import numpy as np
 import base64
-from io import BytesIO
 from PIL import Image
+from io import BytesIO
+from flask import Flask, request, jsonify
 import logging
+from sklearn.preprocessing import normalize
+import hashlib
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -201,6 +204,96 @@ def crop_faces():
         
     except Exception as e:
         logging.error(f"Error cropping faces: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/generate-embedding', methods=['POST'])
+def generate_embedding():
+    """
+    Generate simple face embedding using OpenCV features (no external ML dependencies)
+    """
+    try:
+        # Get image data from request
+        data = request.get_json()
+        if 'image' not in data:
+            return jsonify({'error': 'No image provided'}), 400
+        
+        # Decode base64 image
+        image_data = base64.b64decode(data['image'])
+        image = Image.open(BytesIO(image_data))
+        
+        # Convert to OpenCV format
+        opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
+        
+        # Detect faces to ensure we have a face
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        
+        if len(faces) == 0:
+            return jsonify({
+                'success': False,
+                'error': 'No face detected in crop',
+                'embedding': None,
+                'confidence': 0.0
+            })
+        
+        # Generate simple feature embedding using image properties
+        # This is a simplified approach for Phase 2 - will be replaced with proper ML in Phase 3
+        
+        # Resize image to standard size for consistent features
+        resized = cv2.resize(gray, (64, 64))
+        
+        # Extract histogram features
+        hist = cv2.calcHist([resized], [0], None, [32], [0, 256])
+        hist_features = hist.flatten()
+        
+        # Extract texture features using LBP-like approach
+        texture_features = []
+        for i in range(1, resized.shape[0]-1):
+            for j in range(1, resized.shape[1]-1):
+                center = resized[i, j]
+                pattern = 0
+                pattern += 1 if resized[i-1, j-1] > center else 0
+                pattern += 2 if resized[i-1, j] > center else 0
+                pattern += 4 if resized[i-1, j+1] > center else 0
+                pattern += 8 if resized[i, j+1] > center else 0
+                texture_features.append(pattern % 16)  # Simplified LBP
+        
+        # Combine features
+        texture_hist = np.histogram(texture_features, bins=16)[0]
+        
+        # Create 128-dimensional embedding by combining and padding features
+        combined_features = np.concatenate([hist_features, texture_hist])
+        
+        # Pad or truncate to exactly 128 dimensions
+        if len(combined_features) > 128:
+            embedding = combined_features[:128]
+        else:
+            embedding = np.pad(combined_features, (0, 128 - len(combined_features)), 'constant')
+        
+        # Normalize the embedding
+        embedding = normalize([embedding])[0]
+        
+        # Calculate confidence based on face size and image quality
+        x, y, w, h = faces[0]
+        face_area = w * h
+        image_area = gray.shape[0] * gray.shape[1]
+        face_ratio = face_area / image_area
+        
+        # Higher confidence for larger, clearer faces
+        confidence = min(0.95, max(0.3, face_ratio * 2.0))
+        
+        result = {
+            'success': True,
+            'embedding': embedding.tolist(),
+            'confidence': float(confidence),
+            'model': 'OpenCV-Features-128D'
+        }
+        
+        logging.info(f"Generated OpenCV embedding with confidence {confidence:.3f}")
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Error generating embedding: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/health', methods=['GET'])
